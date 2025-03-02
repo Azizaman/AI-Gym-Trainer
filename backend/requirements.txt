@@ -1,0 +1,11 @@
+# Essential Libraries
+Flask==3.0.0
+Flask-CORS==3.0.10
+opencv-python==4.8.0.74
+imageio-ffmpeg==0.4.7
+mediapipe== 0.10.11
+numpy<2.0
+
+# Machine Learning
+ Libraries
+tensorflow==2.13.0
