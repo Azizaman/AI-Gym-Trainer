@@ -48,8 +48,8 @@ const UploadVideo = () => {
   }, [processedVideoUrl]);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white px-6 py-12">
-      <div className="w-full max-w-2xl p-8 bg-gray-800 rounded-lg shadow-lg">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white px-6 py-12">
+      <div className="w-full max-w-2xl p-8 bg-black rounded-lg shadow-lg">
         <h1 className="text-3xl font-bold mb-6 text-center">
           Upload and Process Your Video
         </h1>
