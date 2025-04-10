@@ -16,13 +16,12 @@ export function ThreeDCardDemo() {
       </header>
 
 
-      <div className="bg-black min-h-screen flex gap-10 justify-center items-center py-10">
-
-      {/* Live Video Card */}
-      <CardContainer className="inter-var">
-        <CardBody
-          className="bg-black relative group/card dark:hover:shadow-2xl dark:hover:shadow-emerald-500/[0.1] dark:bg-black border-white/[0.8] w-auto sm:w-[30rem] h-auto rounded-xl p-6 border border-[0.5px]" // Thinner white border
-        >
+      <div className="bg-black min-h-screen flex gap-10 justify-center items-center py-10 ml-56">
+        {/* Live Video Card */}
+        <CardContainer className="inter-var">
+          <CardBody
+            className="bg-black relative group/card dark:hover:shadow-2xl dark:hover:shadow-emerald-500/[0.1] dark:bg-black border-white/[0.8] w-auto sm:w-[30rem] h-auto rounded-xl p-6 border border-[0.5px]"
+          >
           <CardItem
             translateZ="50"
             className="text-xl font-bold text-neutral-600 dark:text-white"
@@ -90,7 +89,7 @@ export function ThreeDCardDemo() {
             <CardItem
               translateZ={20}
               as={Link}
-              to="/upload"
+              to="/dashboard"
               target="__blank"
               className="px-4 py-2 rounded-xl text-xl font-normal text-white"
             >
