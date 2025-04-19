@@ -4,11 +4,13 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { PlusCircle } from "lucide-react";
+import { Dropdown } from "./Dropdown";
+import axios from "axios";
 
 type Video = {
   id: string;
   title: string;
-  url: string; // Video URL (processed)
+  url: string;
   thumbnail: string;
 };
 
@@ -31,20 +33,52 @@ export default function Dashboard() {
   const [videos, setVideos] = useState<Video[]>(mockVideos);
   const [newTitle, setNewTitle] = useState("");
   const [newFile, setNewFile] = useState<File | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<string>("");
+  const [isUploading, setIsUploading] = useState(false);
 
-  const handleVideoUpload = () => {
-    if (newFile) {
-      // Here you should upload the file to Firebase Storage & trigger backend processing
-      const fakeVideo: Video = {
-        id: Date.now().toString(),
-        title: newTitle || "Untitled Video",
-        url: URL.createObjectURL(newFile), // Temporary URL
-        thumbnail: "https://via.placeholder.com/300x200.png?text=New+Video",
-      };
+  const handleVideoUpload = async () => {
+    if (!newFile || !selectedExercise) {
+      alert("Please select both a video file and an exercise type");
+      return;
+    }
 
-      setVideos((prev) => [fakeVideo, ...prev]);
-      setNewFile(null);
-      setNewTitle("");
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("video", newFile);
+      formData.append("exercise", selectedExercise);
+      formData.append("title", newTitle || "Untitled Video");
+      const token = localStorage.getItem('token');
+      console.log('this is the token',token)
+      console.log('this is the selected exercise',selectedExercise)
+
+      const response = await axios.post(`${import.meta.env.VITE_API_BASE_URL}/upload`, formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+          "Authorization": `Bearer ${token}`
+        },
+      });
+      console.log(response);
+      console.log('this is the exercise selected',selectedExercise)
+
+      if (response.data) {
+        const newVideo: Video = {
+          id: response.data.id || Date.now().toString(),
+          title: newTitle || "Untitled Video",
+          url: response.data.url || URL.createObjectURL(newFile),
+          thumbnail: response.data.thumbnail || "https://via.placeholder.com/300x200.png?text=New+Video",
+        };
+
+        setVideos((prev) => [newVideo, ...prev]);
+        setNewFile(null);
+        setNewTitle("");
+        setSelectedExercise("");
+      }
+    } catch (error) {
+      console.error("Error uploading video:", error);
+      alert("Failed to upload video. Please try again.");
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -64,13 +98,11 @@ export default function Dashboard() {
           </DialogTrigger>
           <DialogContent className="bg-gray-900 border border-gray-800">
             <h2 className="text-xl font-semibold mb-4 text-white">Upload New Video</h2>
-            <Input
-              type="text"
-              placeholder="Enter a title"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              className="mb-4 bg-gray-800 border-gray-700 text-white"
-            />
+            
+            <div className="mb-4">
+              <Dropdown onValueChange={setSelectedExercise} />
+            </div>
+            
             <Input
               type="file"
               accept="video/*"
@@ -79,10 +111,10 @@ export default function Dashboard() {
             />
             <Button 
               onClick={handleVideoUpload} 
-              disabled={!newFile}
-              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
+              disabled={!newFile || !selectedExercise || isUploading}
+              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-800 hover:to-pink-700 text-white"
             >
-              Upload
+              {isUploading ? "Uploading..." : "Upload"}
             </Button>
           </DialogContent>
         </Dialog>
