@@ -1,8 +1,5 @@
 from dotenv import load_dotenv
 import os
-import boto3
-from botocore.config import Config
-from botocore.exceptions import ClientError
 import cv2
 import numpy as np
 import mediapipe as mp
@@ -14,46 +11,35 @@ from flask_cors import CORS
 from pymongo import MongoClient
 from firebase_admin import auth, credentials
 import firebase_admin
-import time
-import tempfile
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from datetime import timedelta
+import boto3
+from botocore.client import Config
 
 # Load environment variables
 load_dotenv()
-print("Imports happened successfully")
-
-# Debug: Print loaded environment variables
-print("Loaded environment variables:")
-print(f"WASABI_ACCESS_KEY: {os.getenv('WASABI_ACCESS_KEY')}")
-print(f"WASABI_SECRET_KEY: {os.getenv('WASABI_SECRET_KEY')}")
-print(f"WASABI_BUCKET_NAME: {os.getenv('WASABI_BUCKET_NAME')}")
-print(f"WASABI_REGION: {os.getenv('WASABI_REGION')}")
-print(f"WASABI_ENDPOINT_URL: {os.getenv('WASABI_ENDPOINT_URL')}")
-print(f"FIREBASE_CREDENTIALS_PATH: {os.getenv('FIREBASE_CREDENTIALS_PATH')}")
 
 app = Flask(__name__)
-CORS(app, resources={r"/upload": {"origins": "http://localhost:5173"}})  # Adjust to your frontend URL
+CORS(app)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+print("Imports happened successfully")
 
 # Initialize Firebase Admin SDK
 FIREBASE_CREDENTIALS_PATH = os.getenv('FIREBASE_CREDENTIALS_PATH')
 if not FIREBASE_CREDENTIALS_PATH:
     raise ValueError("FIREBASE_CREDENTIALS_PATH not set in environment variables")
-if not os.path.exists(FIREBASE_CREDENTIALS_PATH):
-    raise FileNotFoundError(f"Firebase credentials file not found at: {FIREBASE_CREDENTIALS_PATH}")
 try:
     cred = credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
     firebase_admin.initialize_app(cred)
     print("Firebase Admin SDK initialized successfully")
 except Exception as e:
-    logger.error(f"Firebase initialization failed: {str(e)}")
+    logger.error(f"Firebase initialization failed: {e}")
     raise
 
 # MongoDB Configuration
 try:
-    mongo_client = MongoClient('mongodb+srv://azizamanaaa97:easypassword@cluster0.tyjfznw.mongodb.net/second-brain')
+    MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb+srv://azizamanaaa97:easypassword@cluster0.tyjfznw.mongodb.net/ai_fitness_db?retryWrites=true&w=majority')
+    mongo_client = MongoClient(MONGODB_URI)
     mongo_client.server_info()
     print("MongoDB connection successful")
 except Exception as e:
@@ -64,103 +50,73 @@ videos_collection = db['videos']
 users_collection = db['users']
 print("MongoDB collections initialized")
 
-# Wasabi (S3-compatible) Configuration
+# Wasabi S3 Configuration
 try:
     print("Initializing Wasabi S3 client...")
     WASABI_ACCESS_KEY = os.getenv('WASABI_ACCESS_KEY')
     WASABI_SECRET_KEY = os.getenv('WASABI_SECRET_KEY')
     WASABI_BUCKET_NAME = os.getenv('WASABI_BUCKET_NAME')
-    WASABI_REGION = os.getenv('WASABI_REGION')
     WASABI_ENDPOINT_URL = os.getenv('WASABI_ENDPOINT_URL')
-
-    if not all([WASABI_ACCESS_KEY, WASABI_SECRET_KEY, WASABI_BUCKET_NAME, WASABI_REGION, WASABI_ENDPOINT_URL]):
-        missing_vars = [var for var, val in [
-            ('WASABI_ACCESS_KEY', WASABI_ACCESS_KEY),
-            ('WASABI_SECRET_KEY', WASABI_SECRET_KEY),
-            ('WASABI_BUCKET_NAME', WASABI_BUCKET_NAME),
-            ('WASABI_REGION', WASABI_REGION),
-            ('WASABI_ENDPOINT_URL', WASABI_ENDPOINT_URL)
-        ] if not val]
-        raise ValueError(f"Missing Wasabi configuration variables: {', '.join(missing_vars)}")
+    WASABI_REGION = os.getenv('WASABI_REGION')
     
-    print("Wasabi configuration:")
-    print(f"Access Key: {WASABI_ACCESS_KEY}")
-    print(f"Bucket Name: {WASABI_BUCKET_NAME}")
-    print(f"Region: {WASABI_REGION}")
-    print(f"Endpoint URL: {WASABI_ENDPOINT_URL}")
+    if not all([WASABI_ACCESS_KEY, WASABI_SECRET_KEY, WASABI_BUCKET_NAME, WASABI_ENDPOINT_URL, WASABI_REGION]):
+        raise ValueError("Wasabi credentials not found in environment variables")
     
-    s3_client = boto3.client(
-        's3',
+    s3_client = boto3.client('s3',
+        endpoint_url=WASABI_ENDPOINT_URL,
         aws_access_key_id=WASABI_ACCESS_KEY,
         aws_secret_access_key=WASABI_SECRET_KEY,
         region_name=WASABI_REGION,
-        endpoint_url=WASABI_ENDPOINT_URL,
-        config=Config(retries={'max_attempts': 5, 'mode': 'standard'})
+        config=Config(signature_version='s3v4')
     )
     
-    # Verify bucket exists
-    print(f"Verifying bucket '{WASABI_BUCKET_NAME}' exists...")
-    s3_client.head_bucket(Bucket=WASABI_BUCKET_NAME)
-    print("Wasabi S3 bucket initialized successfully")
-except ClientError as e:
-    error_code = e.response['Error']['Code']
-    error_message = e.response['Error']['Message']
-    logger.error(f"Wasabi S3 setup failed with ClientError: {error_code} - {error_message}")
-    if error_code == '404':
-        raise ValueError(f"Bucket '{WASABI_BUCKET_NAME}' does not exist in region '{WASABI_REGION}'. Please create it in the Wasabi console.")
-    elif error_code == '403':
-        raise ValueError(f"Access denied for bucket '{WASABI_BUCKET_NAME}'. Check your access key permissions.")
-    else:
-        raise ValueError(f"Wasabi S3 setup failed: {error_code} - {error_message}")
+    # Check if the bucket exists, if not create it
+    try:
+        s3_client.head_bucket(Bucket=WASABI_BUCKET_NAME)
+        print(f"Wasabi bucket '{WASABI_BUCKET_NAME}' confirmed")
+    except Exception as e:
+        # If bucket doesn't exist, create it
+        print(f"Bucket does not exist or not accessible: {e}")
+        print(f"Creating bucket '{WASABI_BUCKET_NAME}'...")
+        s3_client.create_bucket(
+            Bucket=WASABI_BUCKET_NAME,
+            CreateBucketConfiguration={'LocationConstraint': WASABI_REGION}
+        )
+        print(f"Bucket '{WASABI_BUCKET_NAME}' created successfully")
+    
+    print("Wasabi S3 connection successful")
 except Exception as e:
-    logger.error(f"Wasabi S3 setup failed: {str(e)}")
+    logger.error(f"Wasabi S3 setup failed: {e}")
+    print(f"Wasabi S3 setup failed: {e}")
     raise
 
-def get_signed_url(file_key: str, valid_duration_seconds: int = 3600):
+def get_signed_url(file_key, expires_in=3600):
+    """
+    Generate a signed URL for accessing a file stored in Wasabi.
+    
+    Args:
+        file_key (str): The key/path of the file in the S3 bucket
+        expires_in (int): URL expiration time in seconds (default: 1 hour)
+    
+    Returns:
+        str: Signed URL to access the file
+    """
     try:
         print(f"🔐 Generating signed URL for: {file_key}")
-        signed_url = s3_client.generate_presigned_url(
+        url = s3_client.generate_presigned_url(
             'get_object',
             Params={'Bucket': WASABI_BUCKET_NAME, 'Key': file_key},
-            ExpiresIn=valid_duration_seconds
+            ExpiresIn=expires_in
         )
-        print(f"✅ Full signed URL: {signed_url}")
-        return signed_url
-    except ClientError as e:
+        print(f"✅ Generated signed URL: {url}")
+        return url
+    except Exception as e:
         logger.error(f"🚨 Failed to generate signed URL for '{file_key}': {e}")
         return None
 
-def firebase_required(f):
-    def decorated_function(*args, **kwargs):
-        auth_header = request.headers.get('Authorization', '')
-        print(f"Authorization header received: {auth_header}")
-        if not auth_header.startswith('Bearer '):
-            logger.error("No Bearer token provided in Authorization header")
-            return jsonify({'error': 'No token provided'}), 401
-        token = auth_header.replace('Bearer ', '')
-        if not token:
-            logger.error("Token is empty after removing Bearer prefix")
-            return jsonify({'error': 'No token provided'}), 401
-        try:
-            decoded_token = auth.verify_id_token(token)
-            print(f"Decoded token: {decoded_token}")
-            g.user_id = decoded_token['uid']
-            return f(*args, **kwargs)
-        except auth.ExpiredIdTokenError as e:
-            logger.error(f"Firebase token expired: {str(e)}")
-            return jsonify({'error': 'Token expired'}), 401
-        except auth.InvalidIdTokenError as e:
-            logger.error(f"Invalid Firebase token: {str(e)}")
-            return jsonify({'error': 'Invalid token'}), 401
-        except Exception as e:
-            logger.error(f"Firebase token validation failed: {str(e)}")
-            return jsonify({'error': 'Invalid or missing token', 'details': str(e)}), 401
-    decorated_function.__name__ = f.__name__
-    return decorated_function
-
 print("Imports and configurations completed successfully")
 
-UPLOAD_FOLDER = 'Uploads'
+UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'processed'
 ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -175,15 +131,11 @@ except OSError as e:
 
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
-pose = mp_pose.Pose(
-    min_detection_confidence=0.7, 
-    min_tracking_confidence=0.7, 
-    static_image_mode=False
-)
+pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
 EXERCISE_CLASSES = ['squat', 'push_up', 'bicep_curl', 'plank', 'jumping_jack']
 EXERCISE_THRESHOLD = 0.7
-SIDEBAR_WIDTH = 400
+SIDEBAR_WIDTH = 200
 
 def calculate_angle(a, b, c):
     try:
@@ -201,23 +153,17 @@ def calculate_angle(a, b, c):
 def is_starting_position(landmarks, exercise, width, height):
     try:
         left_shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x * width, landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y * height]
-        right_shoulder = [landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].x * width, landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].y * height]
         left_hip = [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x * width, landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y * height]
-        right_hip = [landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value].x * width, landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value].y * height]
         left_knee = [landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].x * width, landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].y * height]
-        right_knee = [landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value].x * width, landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value].y * height]
         left_ankle = [landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].x * width, landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].y * height]
-        right_ankle = [landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE.value].x * width, landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE.value].y * height]
         left_elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x * width, landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y * height]
         left_wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x * width, landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y * height]
 
         if exercise == 'squat':
-            left_knee_angle = calculate_angle(left_hip, left_knee, left_ankle)
-            right_knee_angle = calculate_angle(right_hip, right_knee, right_ankle)
-            hip_height = (left_hip[1] + right_hip[1]) / 2
-            shoulder_height = (left_shoulder[1] + right_shoulder[1]) / 2
-            return (left_knee_angle > 170 and right_knee_angle > 170 and 
-                    abs(hip_height - shoulder_height) < 100)
+            knee_angle = calculate_angle(left_hip, left_knee, left_ankle)
+            hip_height = left_hip[1]
+            shoulder_height = left_shoulder[1]
+            return knee_angle > 160 and abs(hip_height - shoulder_height) < 50
         elif exercise == 'push_up':
             elbow_angle = calculate_angle(left_shoulder, left_elbow, left_wrist)
             return elbow_angle > 160
@@ -244,61 +190,53 @@ def check_squat_form(landmarks, width, height):
 
     try:
         if is_starting_position(landmarks, 'squat', width, height):
-            feedback.append("Starting position detected")
             return feedback, None, error_points
 
         def mp_point(part):
             p = landmarks[mp_pose.PoseLandmark[part].value]
             return [p.x * width, p.y * height]
 
-        left_hip = mp_point("LEFT_HIP")
-        right_hip = mp_point("RIGHT_HIP")
-        left_knee = mp_point("LEFT_KNEE")
-        right_knee = mp_point("RIGHT_KNEE")
-        left_ankle = mp_point("LEFT_ANKLE")
-        right_ankle = mp_point("RIGHT_ANKLE")
-        left_shoulder = mp_point("LEFT_SHOULDER")
-        right_shoulder = mp_point("RIGHT_SHOULDER")
+        # Get joints
+        hip = mp_point("LEFT_HIP")
+        knee = mp_point("LEFT_KNEE")
+        ankle = mp_point("LEFT_ANKLE")
+        shoulder = mp_point("LEFT_SHOULDER")
 
-        left_knee_angle = calculate_angle(left_hip, left_knee, left_ankle)
-        right_knee_angle = calculate_angle(right_hip, right_knee, right_ankle)
-        knee_angle = (left_knee_angle + right_knee_angle) / 2
-        back_angle = calculate_angle(
-            [(left_shoulder[0] + right_shoulder[0]) / 2, (left_shoulder[1] + right_shoulder[1]) / 2],
-            [(left_hip[0] + right_hip[0]) / 2, (left_hip[1] + right_hip[1]) / 2],
-            [(left_ankle[0] + right_ankle[0]) / 2, (left_ankle[1] + right_ankle[1]) / 2]
-        )
+        knee_angle = calculate_angle(hip, knee, ankle)
+        back_angle = calculate_angle(shoulder, hip, ankle)
 
-        if knee_angle < 70:
-            feedback.append("Don't go too deep — aim for 90°.")
-            error_points.extend([(int(left_knee[0]), int(left_knee[1])), (int(right_knee[0]), int(right_knee[1]))])
+        # Squat too deep
+        if knee_angle < 80:
+            feedback.append("Don't go too deep — stop around 90°.")
+            error_points.append((int(knee[0]), int(knee[1])))
             issue_detected = True
 
-        if knee_angle > 120:
+        # Not low enough
+        if knee_angle > 140:
             feedback.append("Go lower to engage your quads.")
-            error_points.extend([(int(left_knee[0]), int(left_knee[1])), (int(right_knee[0]), int(right_knee[1]))])
+            error_points.append((int(knee[0]), int(knee[1])))
             issue_detected = True
 
-        if back_angle < 150:
+        # Back not straight
+        if back_angle < 160:
             feedback.append("Keep your back straight.")
-            error_points.extend([(int(left_hip[0]), int(left_hip[1])), (int(right_hip[0]), int(right_hip[1]))])
+            error_points.append((int(hip[0]), int(hip[1])))
             issue_detected = True
 
-        hip_y = (left_hip[1] + right_hip[1]) / 2
-        knee_y = (left_knee[1] + right_knee[1]) / 2
-        if hip_y < knee_y - 50:
+        # Hip too high (didn't even start squat)
+        if hip[1] < knee[1] - 30:
             feedback.append("Squat deeper.")
-            error_points.extend([(int(left_hip[0]), int(left_hip[1])), (int(right_hip[0]), int(right_hip[1]))])
+            error_points.append((int(hip[0]), int(hip[1])))
             issue_detected = True
 
-        if not issue_detected and 70 <= knee_angle <= 110:
-            feedback.append("Great squat form!")
-            error_points = []
+        # If no issues detected and went low enough
+        if not issue_detected and 80 <= knee_angle <= 130:
+            feedback.append("Nice squat depth!")
 
         return feedback, knee_angle, error_points
+
     except Exception as e:
-        logger.error(f"Error checking squat form: {e}")
-        return feedback, knee_angle, error_points
+        raise ValueError(f"Error checking squat form: {e}")
 
 def check_push_up_form(landmarks, width, height):
     feedback = []
@@ -331,8 +269,7 @@ def check_push_up_form(landmarks, width, height):
             error_points.append((int(left_hip[0]), int(left_hip[1])))
         return feedback, elbow_angle, error_points
     except Exception as e:
-        logger.error(f"Error checking push-up form: {e}")
-        return feedback, elbow_angle, error_points
+        raise ValueError(f"Error checking push-up form: {e}")
 
 def check_bicep_curl_form(landmarks, width, height):
     feedback = []
@@ -367,8 +304,7 @@ def check_bicep_curl_form(landmarks, width, height):
             feedback.append("Good peak! Squeeze.")
         return feedback, elbow_angle, error_points
     except Exception as e:
-        logger.error(f"Error checking bicep curl form: {e}")
-        return feedback, elbow_angle, error_points
+        raise ValueError(f"Error checking bicep curl form: {e}")
 
 def check_plank_form(landmarks, width, height):
     feedback = []
@@ -386,8 +322,7 @@ def check_plank_form(landmarks, width, height):
             error_points.append((int(left_hip[0]), int(left_hip[1])))
         return feedback, body_angle, error_points
     except Exception as e:
-        logger.error(f"Error checking plank form: {e}")
-        return feedback, body_angle, error_points
+        raise ValueError(f"Error checking plank form: {e}")
 
 def check_jumping_jack_form(landmarks, width, height):
     feedback = []
@@ -405,8 +340,7 @@ def check_jumping_jack_form(landmarks, width, height):
             error_points.append((int(left_elbow[0]), int(left_elbow[1])))
         return feedback, arm_angle, error_points
     except Exception as e:
-        logger.error(f"Error checking jumping jack form: {e}")
-        return feedback, arm_angle, error_points
+        raise ValueError(f"Error checking jumping jack form: {e}")
 
 def count_reps(exercise, angles, fps, total_frames):
     try:
@@ -416,9 +350,9 @@ def count_reps(exercise, angles, fps, total_frames):
             for angle in angles:
                 if angle is None:
                     continue
-                if angle < 110 and not in_position:
+                if angle < 120 and not in_position:
                     in_position = True
-                elif angle > 170 and in_position:
+                elif angle > 150 and in_position:
                     reps += 1
                     in_position = False
         elif exercise == 'push_up':
@@ -452,18 +386,32 @@ def count_reps(exercise, angles, fps, total_frames):
                     in_position = False
         return reps
     except Exception as e:
-        logger.error(f"Error counting reps: {e}")
-        return 0
+        raise ValueError(f"Error counting reps: {e}")
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+# Custom decorator for Firebase token verification
+def firebase_required(f):
+    def decorated_function(*args, **kwargs):
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            return jsonify({'error': 'No token provided'}), 401
+        try:
+            decoded_token = auth.verify_id_token(token)
+            g.user_id = decoded_token['uid']  # Store user_id in Flask's g object
+            return f(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Invalid Firebase token: {e}")
+            return jsonify({'error': 'Invalid or missing token'}), 401
+    decorated_function.__name__ = f.__name__  # Preserve endpoint name
+    return decorated_function
+
 @app.route('/upload', methods=['POST'])
 @firebase_required
 def upload_video():
-    start_time = time.time()
-    user_id = g.user_id
-    logger.info(f"Starting upload for user {user_id}")
+    user_id = g.user_id  # Get user_id from g object
+    print('inside the upload route 1')
 
     if 'video' not in request.files:
         return jsonify({'error': 'No video file provided'}), 400
@@ -473,145 +421,109 @@ def upload_video():
         return jsonify({'error': 'Invalid file or extension'}), 400
     
     exercise = request.form.get('exercise')
+    print(f'This is the {exercise} exercise')
     if not exercise or exercise not in EXERCISE_CLASSES:
         return jsonify({'error': 'Invalid or missing exercise type. Must be one of: ' + ', '.join(EXERCISE_CLASSES)}), 400
 
-    # Save video data to a temporary file
-    video_data = file.read()
     filename = secure_filename(file.filename)
-    logger.info(f"Read video: {filename}, size: {len(video_data)} bytes")
-    
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{filename.rsplit('.', 1)[1]}") as temp_file:
-            temp_file.write(video_data)
-            temp_file_path = temp_file.name
-        logger.info(f"Saved video to temporary file: {temp_file_path}")
-    except Exception as e:
-        logger.error(f"Error saving video to temporary file: {str(e)}")
-        return jsonify({'error': f'Failed to save video file: {str(e)}'}), 500
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+    logger.info(f"File saved locally: {filepath}")
 
-    # Upload original video to Wasabi
+    # Upload original video to Wasabi S3
     original_key = f'videos/{user_id}/original/{filename}'
-    upload_time = time.time()
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            s3_client.put_object(
-                Bucket=WASABI_BUCKET_NAME,
-                Key=original_key,
-                Body=video_data
+    try:
+        print('Uploading original video to Wasabi...')
+        with open(filepath, 'rb') as file_data:
+            s3_client.upload_fileobj(
+                file_data, 
+                WASABI_BUCKET_NAME, 
+                original_key,
+                ExtraArgs={'ContentType': 'video/mp4'}
             )
-            original_url = get_signed_url(original_key)
-            logger.info(f"Original video uploaded: {original_url}")
-            break
-        except ClientError as e:
-            logger.error(f"Upload attempt {attempt + 1} failed: {str(e)}")
-            if attempt == max_retries - 1:
-                os.remove(temp_file_path)
-                return jsonify({'error': f'Failed to upload original video after {max_retries} attempts: {str(e)}'}), 500
-            time.sleep(2 ** attempt)
-    logger.info(f"Original upload took {time.time() - upload_time:.2f} seconds")
+        original_url = get_signed_url(original_key)
+        logger.info(f"Original video uploaded to Wasabi: {original_url}")
+        print('Original video upload complete')
+    except Exception as e:
+        logger.error(f"Failed to upload or generate URL for original video: {str(e)}")
+        os.remove(filepath)
+        return jsonify({'error': f'Failed to upload original video to Wasabi: {str(e)}'}), 500
 
-    # Process video
-    process_time = time.time()
-    logger.info(f"Opening video file: {temp_file_path}")
-    cap = cv2.VideoCapture(temp_file_path)
+    cap = cv2.VideoCapture(filepath)
     if not cap.isOpened():
-        os.remove(temp_file_path)
-        logger.error("Could not open video file")
+        os.remove(filepath)
         return jsonify({'error': 'Could not open video file'}), 500
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    logger.info(f"Video: {width}x{height}, {fps} fps, {total_frames} frames")
-
-    process_width, process_height = 640, 480
-    scale_x, scale_y = width / process_width, height / process_height
+    logger.info(f"Video opened: {width}x{height}, {fps} fps, {total_frames} frames")
 
     new_width = width + SIDEBAR_WIDTH
     unique_id = uuid.uuid4()
     output_filename = f"{unique_id}_processed.avi"
     output_filepath = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
-    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-    out = cv2.VideoWriter(output_filepath, fourcc, fps, (new_width, height), isColor=True)
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter(output_filepath, fourcc, fps, (new_width, height))
     if not out.isOpened():
         cap.release()
-        os.remove(temp_file_path)
-        logger.error("Could not create video writer")
-        return jsonify({'error': 'Could not create video writer'}), 500
+        os.remove(filepath)
+        return jsonify({'error': f'Could not create video writer for {output_filepath}'}), 500
 
     feedback_list = []
     relevant_angles = []
     frame_count = 0
-    FRAME_SKIP = 5
+    reps = 0
 
     while True:
         ret, frame = cap.read()
         if not ret:
-            logger.info("Finished reading frames")
+            logger.info("Finished reading video frames")
             break
 
         new_frame = np.zeros((height, new_width, 3), dtype=np.uint8)
         new_frame[:, :width, :] = frame
         new_frame[:, width:, :] = (255, 255, 255)
 
-        if frame_count % FRAME_SKIP == 0:
-            small_frame = cv2.resize(frame, (process_width, process_height))
-            frame_rgb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-            results = pose.process(frame_rgb)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = pose.process(frame_rgb)
 
-            if results.pose_landmarks:
-                try:
-                    for lm in results.pose_landmarks.landmark:
-                        lm.x *= scale_x
-                        lm.y *= scale_y
+        if results.pose_landmarks:
+            try:
+                landmarks = results.pose_landmarks.landmark
+                if exercise == 'squat':
+                    feedback, angle, error_points = check_squat_form(landmarks, width, height)
+                elif exercise == 'push_up':
+                    feedback, angle, error_points = check_push_up_form(landmarks, width, height)
+                elif exercise == 'bicep_curl':
+                    feedback, angle, error_points = check_bicep_curl_form(landmarks, width, height)
+                elif exercise == 'plank':
+                    feedback, angle, error_points = check_plank_form(landmarks, width, height)
+                elif exercise == 'jumping_jack':
+                    feedback, angle, error_points = check_jumping_jack_form(landmarks, width, height)
+                
+                relevant_angles.append(angle)
+                if feedback:
+                    feedback_list.extend(feedback)
 
-                    landmarks = results.pose_landmarks.landmark
-                    if exercise == 'squat':
-                        feedback, angle, error_points = check_squat_form(landmarks, width, height)
-                    elif exercise == 'push_up':
-                        feedback, angle, error_points = check_push_up_form(landmarks, width, height)
-                    elif exercise == 'bicep_curl':
-                        feedback, angle, error_points = check_bicep_curl_form(landmarks, width, height)
-                    elif exercise == 'plank':
-                        feedback, angle, error_points = check_plank_form(landmarks, width, height)
-                    elif exercise == 'jumping_jack':
-                        feedback, angle, error_points = check_jumping_jack_form(landmarks, width, height)
-                    
-                    relevant_angles.append(angle)
-                    if feedback:
-                        feedback_list.extend(feedback)
-
-                    line_color = (0, 255, 0) if not error_points else (0, 0, 255)
-                    mp_drawing.draw_landmarks(
-                        new_frame[:, :width, :],
-                        results.pose_landmarks, 
-                        mp_pose.POSE_CONNECTIONS,
-                        landmark_drawing_spec=mp_drawing.DrawingSpec(color=(255, 255, 255), thickness=4, circle_radius=6),
-                        connection_drawing_spec=mp_drawing.DrawingSpec(color=line_color, thickness=3)
-                    )
-                except ValueError as e:
-                    logger.error(f"Frame error: {e}")
-                    cap.release()
-                    out.release()
-                    os.remove(temp_file_path)
-                    return jsonify({'error': f'Frame processing error: {e}'}), 500
-        else:
-            if 'results' in locals() and results and results.pose_landmarks:
+                line_color = (0, 255, 0) if not error_points else (0, 0, 255)
                 mp_drawing.draw_landmarks(
-                    new_frame[:, :width, :],
-                    results.pose_landmarks, 
-                    mp_pose.POSE_CONNECTIONS,
-                    landmark_drawing_spec=mp_drawing.DrawingSpec(color=(255, 255, 255), thickness=4, circle_radius=6),
-                    connection_drawing_spec=mp_drawing.DrawingSpec(color=line_color, thickness=3)
+                    new_frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS,
+                    landmark_drawing_spec=mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                    connection_drawing_spec=mp_drawing.DrawingSpec(color=line_color, thickness=2)
                 )
 
-        y_pos = 50
-        for msg in set(feedback_list[-10:]):
-            cv2.putText(new_frame, msg, (width + 10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-            y_pos += 30
+                y_pos = 50
+                for msg in set(feedback):
+                    cv2.putText(new_frame, msg, (width + 10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
+                    y_pos += 40
+            except ValueError as e:
+                logger.error(f"Error processing frame: {e}")
+                cap.release()
+                out.release()
+                os.remove(filepath)
+                return jsonify({'error': f'Error processing frame: {e}'}), 500
 
         cv2.putText(new_frame, f"Exercise: {exercise}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
         if frame_count == 0 or frame_count == total_frames - 1:
@@ -620,34 +532,38 @@ def upload_video():
         out.write(new_frame)
         frame_count += 1
 
-    logger.info(f"Processing took {time.time() - process_time:.2f} seconds")
+    logger.info(f"Video processing complete: {output_filepath}")
     cap.release()
     out.release()
 
-    # Upload processed video to Wasabi
-    upload_processed_time = time.time()
-    processed_key = f'videos/{user_id}/processed/{output_filename}'
-    for attempt in range(max_retries):
-        try:
-            with open(output_filepath, 'rb') as f:
-                s3_client.put_object(
-                    Bucket=WASABI_BUCKET_NAME,
-                    Key=processed_key,
-                    Body=f
-                )
-            processed_url = get_signed_url(processed_key)
-            logger.info(f"Processed video uploaded: {processed_url}")
-            break
-        except ClientError as e:
-            logger.error(f"Processed upload attempt {attempt + 1} failed: {str(e)}")
-            if attempt == max_retries - 1:
-                os.remove(temp_file_path)
-                os.remove(output_filepath)
-                return jsonify({'error': f'Failed to upload processed video after {max_retries} attempts: {str(e)}'}), 500
-            time.sleep(2 ** attempt)
-    logger.info(f"Processed upload took {time.time() - upload_processed_time:.2f} seconds")
+    # Verify processed file exists locally before uploading
+    if not os.path.exists(output_filepath):
+        logger.error(f"Processed file not found locally: {output_filepath}")
+        os.remove(filepath)
+        return jsonify({'error': 'Processed video file was not created successfully'}), 500
+    else:
+        logger.info(f"Processed file exists locally: {output_filepath}, size: {os.path.getsize(output_filepath)} bytes")
 
-    # Save to MongoDB
+    # Upload processed video to Wasabi S3
+    processed_key = f'videos/{user_id}/processed/{output_filename}'
+    try:
+        logger.info(f"Attempting to upload processed video to Wasabi with key: {processed_key}")
+        with open(output_filepath, 'rb') as file_data:
+            s3_client.upload_fileobj(
+                file_data, 
+                WASABI_BUCKET_NAME, 
+                processed_key,
+                ExtraArgs={'ContentType': 'video/x-msvideo'}
+            )
+        processed_url = get_signed_url(processed_key)
+        logger.info(f"Processed video uploaded to Wasabi: {processed_url}")
+        print('Processed video upload complete')
+    except Exception as e:
+        logger.error(f"Failed to upload processed video to Wasabi: {str(e)}")
+        os.remove(filepath)
+        os.remove(output_filepath)
+        return jsonify({'error': f'Failed to upload processed video to Wasabi: {str(e)}'}), 500
+
     video_doc = {
         'user_id': user_id,
         'exercise': exercise,
@@ -657,22 +573,14 @@ def upload_video():
         'feedback': list(set(feedback_list)) if feedback_list else ['Good form!'],
         'timestamp': np.datetime64('now').astype(object)
     }
-    try:
-        videos_collection.insert_one(video_doc)
-        logger.info("Video metadata saved to MongoDB")
-    except Exception as e:
-        logger.error(f"Error saving to MongoDB: {str(e)}")
-        os.remove(temp_file_path)
-        os.remove(output_filepath)
-        return jsonify({'error': f'Failed to save video metadata: {str(e)}'}), 500
+    videos_collection.insert_one(video_doc)
 
-    # Clean up temporary files
     try:
-        os.remove(temp_file_path)
+        os.remove(filepath)
         os.remove(output_filepath)
-        logger.info(f"Removed local files: {temp_file_path}, {output_filepath}")
+        logger.info(f"Local files removed: {filepath}, {output_filepath}")
     except OSError as e:
-        logger.error(f"Error removing files: {e}")
+        logger.error(f"Error removing local files: {e}")
 
     response = {
         'exercise': exercise,
@@ -682,25 +590,37 @@ def upload_video():
         'original_video_url': original_url,
         'processed_video_url': processed_url
     }
-    logger.info(f"Total time: {time.time() - start_time:.2f} seconds")
+    print("🧾 Final response URLs:")
+    print(f"Original: {original_url}")
+    print(f"Processed: {processed_url}")
+    logger.info("Sending response to client")
+    print('Video processing and upload completed')
     return jsonify(response), 200
 
-@app.route('/user/processed-videos', methods=['GET'])
+@app.route('/user/videos', methods=['GET'])
 @firebase_required
-def get_processed_videos():
+def get_user_videos():
+    user_id = g.user_id
     try:
-        user_id = g.user_id
-        videos = list(videos_collection.find(
-            {'user_id': user_id},
-            {'processed_url': 1, 'exercise': 1, 'timestamp': 1, '_id': 0}
-        ).sort('timestamp', -1))
-        if not videos:
-            return jsonify({'message': 'No videos found for this user', 'videos': []}), 200
-        return jsonify({'message': f'Found {len(videos)} videos', 'videos': videos}), 200
+        videos = list(videos_collection.find({'user_id': user_id}).sort('timestamp', -1))
+        
+        # Regenerate fresh signed URLs for each video
+        for video in videos:
+            if 'original_url' in video:
+                original_key = video['original_url'].split('?')[0].split(WASABI_BUCKET_NAME + '/')[1]
+                video['original_url'] = get_signed_url(original_key)
+                
+            if 'processed_url' in video:
+                processed_key = video['processed_url'].split('?')[0].split(WASABI_BUCKET_NAME + '/')[1]
+                video['processed_url'] = get_signed_url(processed_key)
+                
+            video['_id'] = str(video['_id'])
+            
+        return jsonify({'videos': videos}), 200
     except Exception as e:
-        logger.error(f"Error fetching processed videos: {e}")
-        return jsonify({'error': 'Failed to fetch processed videos', 'details': str(e)}), 500
+        logger.error(f"Error retrieving user videos: {e}")
+        return jsonify({'error': f'Failed to retrieve videos: {str(e)}'}), 500
 
 if __name__ == '__main__':
     print("🔥 Flask server is starting...")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)  # Enable debug mode for detailed errors
