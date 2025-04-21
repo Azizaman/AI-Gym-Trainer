@@ -1,13 +1,40 @@
-flask==2.3.3
-flask-cors==4.0.0
-boto3==1.28.57
-pymongo==4.5.0
-firebase-admin==6.2.0
-mediapipe==0.10.7
-numpy==1.26.0
-opencv-python==4.8.1
+flask==3.0.0
+flask-cors==3.0.10
+firebase-admin==6.0.0
+python-dotenv==1.0.1
+opencv-python==4.8.0.74
+numpy==1.24.3
+mediapipe==0.10.11
+pymongo==4.10.1
+boto3==1.37.28
+google-api-core==2.10.2
+grpcio==1.59.0
+grpcio-status==1.59.0
+protobuf==3.20.3
+typing-extensions==4.5.0
 
 
+
+
+
+
+
+
+
+# flask==3.0.0
+# flask-cors==3.0.10
+# firebase-admin==6.0.0
+# python-dotenv==1.0.1
+# opencv-python==4.8.0.74
+# numpy==1.24.3
+# mediapipe==0.10.11
+# pymongo==4.10.1
+# boto3==1.37.28
+# google-api-core==2.10.2
+# grpcio==1.48.2
+# grpcio-status==1.48.2
+# protobuf==3.20.3  # Upgraded to support mediapipe and tensorflow-intel
+# typing-extensions==4.5.0
 
 
 
