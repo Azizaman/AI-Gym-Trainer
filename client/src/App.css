@@ -1,0 +1,23 @@
+/* Ensure the entire page has a dark background and is centered */
+html, body, #root {
+  background-color: #000000 !important;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Ensure no unexpected margins or paddings */
+* {
+  box-sizing: border-box;
+}
+
+/* Ensure containers take full width and are centered */
+div {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
