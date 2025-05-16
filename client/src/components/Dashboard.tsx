@@ -1,3 +1,4 @@
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Dashboard.tsx
 
@@ -31,7 +32,8 @@ type Video = {
   exercise: string;
   filename: string;
   video_url: string;
-  reps: number;
+  correct_reps: number;
+  incorrect_reps: number;
   top_feedback: string[];
   uploaded_at: number;
   duration: number;
@@ -76,7 +78,7 @@ export default function Dashboard() {
       const token = localStorage.getItem("token");
       if (!token) throw new Error("No authentication token found");
 
-      const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL || "http://localhost:5000"}/videos`, {
+      const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL || "https://ai-gym-assistant-6.onrender.com"}/videos`, {
         headers: { Authorization: `Bearer ${token}` },
         params: { limit: 10, offset: 0 },
       });
@@ -86,7 +88,8 @@ export default function Dashboard() {
         exercise: v.exercise,
         filename: v.filename,
         video_url: v.video_url,
-        reps: v.reps,
+        correct_reps: v.correct_reps,
+        incorrect_reps: v.incorrect_reps,
         top_feedback: v.feedback,
         uploaded_at: v.uploaded_at,
         duration: v.duration,
@@ -115,7 +118,7 @@ export default function Dashboard() {
       const token = localStorage.getItem("token");
       if (!token) throw new Error("No authentication token found");
 
-      const response = await axios.post(`${import.meta.env.VITE_API_BASE_URL || "http://localhost:5000"}/upload`, formData, {
+      const response = await axios.post(`${import.meta.env.VITE_API_BASE_URL || "https://ai-gym-assistant-10.onrender.com"}/upload`, formData, {
         headers: {
           "Content-Type": "multipart/form-data",
           Authorization: `Bearer ${token}`,
@@ -128,7 +131,8 @@ export default function Dashboard() {
           exercise: response.data.exercise,
           filename: newFile.name,
           video_url: response.data.video_url,
-          reps: response.data.reps,
+          correct_reps: response.data.correct_reps,
+          incorrect_reps: response.data.incorrect_reps,
           top_feedback: response.data.top_feedback,
           uploaded_at: Date.now() / 1000,
           duration: response.data.duration,
@@ -163,7 +167,7 @@ export default function Dashboard() {
       if (!token) throw new Error("No authentication token found");
 
       const response = await axios.post(
-        `${import.meta.env.VITE_API_BASE_URL || "http://localhost:5000"}/chat`,
+        `${import.meta.env.VITE_API_BASE_URL || "https://ai-gym-assistant-10.onrender.com"}/chat`,
         { message: chatInput },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -188,7 +192,7 @@ export default function Dashboard() {
 
   const openVideoModal = (video: Video) => setSelectedVideo(video);
   const closeVideoModal = () => setSelectedVideo(null);
-  const isPositiveFeedback = (feedback: string) => ["excellent", "great", "perfect", "good", "solid"].some(k => feedback.toLowerCase().includes(k));
+  const isPositiveFeedback = (feedback: string) => feedback.toLowerCase().includes("correct form");
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-950 to-black text-white flex flex-col items-center justify-start w-full min-w-full p-4 sm:p-6 lg:p-8 font-sans">
@@ -233,13 +237,13 @@ export default function Dashboard() {
                 </div>
               </DialogContent>
             </Dialog>
-            {/* <Button
+            <Button
               onClick={() => setIsChatOpen(!isChatOpen)}
               className="bg-gradient-to-r from-blue-500 to-teal-500 hover:scale-105 hover:from-blue-600 hover:to-teal-600 transition-transform duration-300 text-white font-semibold px-4 sm:px-6 py-2 sm:py-3 rounded-xl shadow-md"
             >
               <MessageCircle className="mr-2 h-4 sm:h-5 w-4 sm:w-5" />
               {isChatOpen ? "Close Chat" : "Chat with Coach"}
-            </Button> */}
+            </Button>
           </div>
         </div>
 
@@ -325,7 +329,8 @@ export default function Dashboard() {
                   <video src={video.video_url} muted className="w-full h-32 sm:h-36 object-cover rounded-lg shadow-inner mx-auto" />
                   <div className="text-xs sm:text-sm text-gray-300 space-y-1 text-center">
                     <p><span className="text-gray-100 font-semibold">Exercise:</span> {video.exercise.replace("_", " ").toUpperCase()}</p>
-                    <p><span className="text-gray-100 font-semibold">Reps:</span> {video.reps}</p>
+                    <p><span className="text-gray-100 font-semibold"> Reps:</span> {video.correct_reps}</p>
+                    {/* <p><span className="text-gray-100 font-semibold">Incorrect Reps:</span> {video.incorrect_reps}</p> */}
                     <p><span className="text-gray-100 font-semibold">Duration:</span> {video.duration.toFixed(2)}s</p>
                   </div>
                 </CardContent>
@@ -344,7 +349,8 @@ export default function Dashboard() {
                 <video src={selectedVideo.video_url} controls className="w-full max-h-64 sm:max-h-80 rounded-lg mx-auto" />
                 <div className="space-y-1 text-xs sm:text-sm text-gray-300 text-center">
                   <p><span className="font-medium text-white">Exercise:</span> {selectedVideo.exercise.replace("_", " ").toUpperCase()}</p>
-                  <p><span className="font-medium text-white">Reps:</span> {selectedVideo.reps}</p>
+                  <p><span className="font-medium text-white"> Reps:</span> {selectedVideo.correct_reps}</p>
+                  {/* <p><span className="font-medium text-white">Incorrect Reps:</span> {selectedVideo.incorrect_reps}</p> */}
                   <p><span className="font-medium text-white">Duration:</span> {selectedVideo.duration.toFixed(2)}s</p>
                   <p><span className="font-medium text-white">Uploaded:</span> {new Date(selectedVideo.uploaded_at * 1000).toLocaleString()}</p>
                 </div>
