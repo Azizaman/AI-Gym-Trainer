@@ -27,7 +27,7 @@ function LandingPage() {
     <div className="flex flex-col min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800 text-white">
       {/* Header */}
       <header className="w-full px-4 py-6 flex justify-between items-center relative z-10 bg-opacity-90 backdrop-blur-sm">
-        <Link>
+        <Link to="/">
           <div className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-600">
             AI Fitness Assistant
           </div>
