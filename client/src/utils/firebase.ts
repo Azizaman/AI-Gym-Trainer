@@ -1,7 +1,7 @@
 // src/utils/firebase.ts
 
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
+// import { getAnalytics } from "firebase/analytics";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
@@ -20,7 +20,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Optional: if you're using it
-const analytics = getAnalytics(app);
+// const analytics = getAnalytics(app);
 
 // Setup Authentication
 export const auth = getAuth(app);
